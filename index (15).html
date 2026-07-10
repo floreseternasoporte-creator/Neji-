@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Naruto Characters 3D - Pixel Edition</title>
+  <title>Avatar: The Last Airbender - Pixel Edition</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -1091,10 +1091,12 @@
     <div id="video-skip-button" style="display:none;">PRESIONA PARA SALTAR</div>
   </div>
 
-  <!-- Pantalla de inicio con logo Naruto arreglado -->
+  <!-- Pantalla de inicio con logo de Avatar -->
   <div id="intro-screen" style="display:none;">
     <div id="naruto-logo-container">
-      <img id="naruto-logo" src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Logo_Naruto_Shipp%C5%ABden.svg/2560px-Logo_Naruto_Shipp%C5%ABden.svg.png" alt="Naruto Shippuden">
+      <div id="naruto-logo" style="font-size: 36px; line-height: 1.2; text-align: center; color: #FFD700; text-shadow: 2px 2px 0px #000, 4px 4px 0px #FF4500;">
+        AVATAR<br><span style="font-size: 16px; color: #00FFFF; text-shadow: 2px 2px 0px #000;">LA LEYENDA DE AANG</span>
+      </div>
     </div>
   </div>
   <!-- Pantalla de carga -->
@@ -1118,49 +1120,9 @@
 
     <div class="characters-grid">
       <div class="char-card" onclick="selectCharacter('neji')" onmouseover="playHoverSound()">
-        <h3>NEJI HYUGA</h3>
+        <h3>NEJI</h3>
         <div class="char-img" style="background: url('https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT_JLthZ20l4C_V-G8cKVR_3hOqAyrTOVTLaw&s') center/contain no-repeat;"></div>
-        <p>PODERES: BYAKUGAN, JUKEN, 64 PALMAS, 128 PALMAS, KAITEN</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('itachi')">
-        <h3>ITACHI UCHIHA</h3>
-        <div class="char-img" style="background: url('https://officialpsds.com/imageview/r0/68/r068ny_large.png?1521316545') center/contain no-repeat;"></div>
-        <p>PODERES: SHARINGAN, AMATERASU, TSUKUYOMI, SUSANOO</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('ino')">
-        <h3>INO YAMANAKA</h3>
-        <div class="char-img" style="background: url('https://static.wikia.nocookie.net/naruto/images/c/cc/Ino_Segunda_Guerra_Mundial_Shinobi_HD.png') center/contain no-repeat;"></div>
-        <p>PODERES: TRANSFERENCIA DE MENTE, BOMBA DE CHAKRA, CONTROL MENTAL, CURACION</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('shikamaru')">
-        <h3>SHIKAMARU NARA</h3>
-        <div class="char-img" style="background: url('https://static.wikia.nocookie.net/naruto/images/9/9a/Shikamaru_Nara.png') center/contain no-repeat;"></div>
-        <p>PODERES: POSESION DE SOMBRA, ESTRANGULACION DE SOMBRA, COSTURA DE SOMBRA, IMITACION DE SOMBRA</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('tenten')">
-        <h3>TENTEN</h3>
-        <div class="char-img" style="background: url('https://static.wikia.nocookie.net/naruto/images/9/92/Tenten_Part_2.png') center/contain no-repeat;"></div>
-        <p>PODERES: INVOCACION DE ARMAS, LLUVIA DE KUNAIS, PERGAMINO GIGANTE, BARRERA DE ARMAS</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('hinata')">
-        <h3>HINATA HYUGA</h3>
-        <div class="char-img" style="background: url('https://static.wikia.nocookie.net/naruto/images/9/97/Hinata.png') center/contain no-repeat;"></div>
-        <p>PODERES: BYAKUGAN, PUNO SUAVE, LEON GEMELO, PROTECCION DE 8 TRIGRAMAS</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('temari')">
-        <h3>TEMARI</h3>
-        <div class="char-img" style="background: url('https://static.wikia.nocookie.net/naruto/images/7/7c/Temari_Part_2.png') center/contain no-repeat;"></div>
-        <p>PODERES: DANZA DEL ABANICO, TORBELLINO CORTANTE, GUADANA COMADREJA, INVOCACION</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('sasuke')">
-        <h3>SASUKE UCHIHA</h3>
-        <div class="char-img" style="background: url('https://static.wikia.nocookie.net/naruto/images/2/21/Sasuke_Part_2.png') center/contain no-repeat;"></div>
-        <p>PODERES: CHIDORI, SHARINGAN, AMATERASU, KIRIN</p>
-      </div>
-      <div class="char-card" onclick="selectCharacter('hashirama')">
-        <h3>HASHIRAMA SENJU</h3>
-        <div class="char-img" style="background: url('https://static.wikia.nocookie.net/naruto/images/7/7e/Hashirama_Senju.png') center/contain no-repeat;"></div>
-        <p>PODERES: MOKUTON, SENJUTSU, REGENERACION, GOJU MOKUTON</p>
+        <p>PERSONAJE DISPONIBLE · HABILIDADES: BYAKUGAN, JUKEN, KAITEN</p>
       </div>
     </div>
   </div>
@@ -1326,6 +1288,10 @@
     // Mostrar botón de skip inmediatamente
     canSkip = true;
     videoSkipButton.style.display = 'block';
+    videoSkipButton.onclick = () => {
+      console.log('⏭️ Botón de skip del video clickeado');
+      nextStep();
+    };
 
     // Auto-avanzar SOLO cuando termine el video
     introVideo.addEventListener('ended', () => {
@@ -1518,7 +1484,7 @@
             margin: 0 0 20px 0;
             letter-spacing: 4px;
             animation: pixelGlow 2s steps(4) infinite;
-          ">NARUTO</h1>
+          ">AVATAR</h1>
 
           <h2 style="
             color: #00ffff;
@@ -1526,7 +1492,7 @@
             text-shadow: 2px 2px 0px #000, 4px 4px 0px rgba(0,255,255,0.5);
             margin: 0 0 40px 0;
             letter-spacing: 3px;
-          ">FINAL TIME</h2>
+          ">THE LAST AIRBENDER</h2>
 
           <button id="play-game-btn" style="
             background: 
@@ -1776,19 +1742,11 @@
     }
   });
 
-  // CONTROLES DE TECLADO GLOBALES - ACTIVOS DESDE EL INICIO
+  // CONTROLES DE TECLADO GLOBALES - ACTIVOS SOLO PARA LAS PANTALLAS DE INTRO
   document.addEventListener('keydown', (e) => {
-    if(e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') {
+    if ((e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') && currentStep < 5) {
       e.preventDefault();
       console.log('✅ TECLA SKIP:', e.code, 'currentStep:', currentStep);
-      nextStep();
-    }
-  });
-
-  // CLICK GLOBAL EN CUALQUIER PARTE - ACTIVO DESDE EL INICIO
-  document.addEventListener('click', (e) => {
-    console.log('✅ CLICK GLOBAL detectado en:', e.target.tagName, 'currentStep:', currentStep);
-    if(currentStep < 5) {
       nextStep();
     }
   });
@@ -1918,7 +1876,7 @@
   let lastMouseY = 0;
   const MAX_HEALTH = 5;
   const WORLD_CONFIG = {
-    name: 'Mundo de Konoha',
+    name: 'Mundo de Avatar',
     maxEnemies: 8,
     enemyHealth: 100,
     respawnTime: 10000
@@ -1934,7 +1892,7 @@
       heart.className = `player-heart ${i >= playerHealth ? 'heart-empty' : ''}`;
       container.appendChild(heart);
     }
-    document.getElementById('player-level').textContent = 'MUNDO ABIERTO - KONOHA';
+    document.getElementById('player-level').textContent = 'MUNDO ABIERTO - AVATAR';
     
     // Agregar indicador de salto
     let jumpIndicator = document.createElement('div');
@@ -1951,14 +1909,7 @@
   let currentCharacter = '';
 let playerSpeed = 0.25; // Velocidad base aumentada
 let characterNames = {
-  'neji': 'NEJI HYUGA',
-  'itachi': 'ITACHI UCHIHA',
-  'ino': 'INO YAMANAKA',
-  'shikamaru': 'SHIKAMARU NARA',
-  'tenten': 'TENTEN',
-  'hinata': 'HINATA HYUGA',
-  'temari': 'TEMARI',
-  'sasuke': 'SASUKE UCHIHA'
+  'neji': 'NEJI'
 };
 
 // Mostrar nombre del personaje
@@ -2102,49 +2053,9 @@ function showCharacterName() {
     // Obtener datos del personaje
     const characterData = {
       'neji': {
-        name: 'NEJI HYUGA',
+        name: 'NEJI',
         image: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT_JLthZ20l4C_V-G8cKVR_3hOqAyrTOVTLaw&s',
-        abilities: 'BYAKUGAN • JUKEN • 64 PALMAS'
-      },
-      'itachi': {
-        name: 'ITACHI UCHIHA',
-        image: 'https://officialpsds.com/imageview/r0/68/r068ny_large.png?1521316545',
-        abilities: 'SHARINGAN • AMATERASU • TSUKUYOMI'
-      },
-      'ino': {
-        name: 'INO YAMANAKA',
-        image: 'https://static.wikia.nocookie.net/naruto/images/c/cc/Ino_Segunda_Guerra_Mundial_Shinobi_HD.png',
-        abilities: 'MENTE • CONTROL • CURACIÓN'
-      },
-      'shikamaru': {
-        name: 'SHIKAMARU NARA',
-        image: 'https://static.wikia.nocookie.net/naruto/images/9/9a/Shikamaru_Nara.png',
-        abilities: 'SOMBRAS • POSESIÓN • ESTRATEGIA'
-      },
-      'tenten': {
-        name: 'TENTEN',
-        image: 'https://static.wikia.nocookie.net/naruto/images/9/92/Tenten_Part_2.png',
-        abilities: 'ARMAS • INVOCACIÓN • PERGAMINOS'
-      },
-      'hinata': {
-        name: 'HINATA HYUGA',
-        image: 'https://static.wikia.nocookie.net/naruto/images/9/97/Hinata.png',
-        abilities: 'BYAKUGAN • PUÑO SUAVE • LEONES'
-      },
-      'temari': {
-        name: 'TEMARI',
-        image: 'https://static.wikia.nocookie.net/naruto/images/7/7c/Temari_Part_2.png',
-        abilities: 'ABANICO • VIENTO • TORBELLINO'
-      },
-      'sasuke': {
-        name: 'SASUKE UCHIHA',
-        image: 'https://static.wikia.nocookie.net/naruto/images/2/21/Sasuke_Part_2.png',
-        abilities: 'CHIDORI • SHARINGAN • KIRIN'
-      },
-      'hashirama': {
-        name: 'HASHIRAMA SENJU',
-        image: 'https://static.wikia.nocookie.net/naruto/images/7/7e/Hashirama_Senju.png',
-        abilities: 'MOKUTON • SENJUTSU • REGENERACIÓN'
+        abilities: 'BYAKUGAN • JUKEN • KAITEN'
       }
     };
 
