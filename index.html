@@ -1931,6 +1931,135 @@
     respawnTime: 10000
   };
 
+  // ===== INGENIERÍA: helpers centralizados y estado de sesión =====
+  let playerContactCooldownUntil = 0; // Cooldown de daño por contacto (ms)
+  let joystickActive = false;        // El joystick está siendo usado
+  let respawnIntervalId = null;      // Intervalo de respawn (evita duplicados)
+  let gameRafId = null;              // requestAnimationFrame activo
+  const trackedTimeouts = new Set();
+  const trackedIntervals = new Set();
+
+  function trackTimeout(id){ trackedTimeouts.add(id); return id; }
+  function trackInterval(id){ trackedIntervals.add(id); return id; }
+  function untrackTimeout(id){ trackedTimeouts.delete(id); }
+  function untrackInterval(id){ trackedIntervals.delete(id); }
+
+  // Recorrer materiales de un grupo de forma segura (los enemigos son THREE.Group)
+  function eachEnemyMaterial(group, fn){
+    if(!group) return;
+    group.traverse(o => {
+      if(o.isMesh){
+        let mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach(m => { if(m) fn(m); });
+      }
+    });
+  }
+  function setEnemyGroupColor(group, hex){
+    eachEnemyMaterial(group, m => { if(m.color) m.color.setHex(hex); });
+  }
+  function setEnemyGroupOpacity(group, opacity, transparent){
+    eachEnemyMaterial(group, m => { m.transparent = transparent; m.opacity = opacity; });
+  }
+
+  // Dirección de ataque: hacia el enemigo más cercano, o hacia donde mira el jugador
+  function getAttackDirection(){
+    let nearest = null, minD = Infinity;
+    enemies.forEach(e => {
+      let d = player.position.distanceToSquared(e.position);
+      if(d < minD){ minD = d; nearest = e; }
+    });
+    if(nearest && minD < 30*30){
+      return nearest.position.clone().sub(player.position).setY(0).normalize();
+    }
+    let dir = new THREE.Vector3(0,0,-1);
+    dir.applyQuaternion(player.quaternion);
+    dir.y = 0;
+    if(dir.lengthSq() < 0.0001) dir.set(0,0,-1);
+    return dir.normalize();
+  }
+
+  // Liberar geometrías/materiales temporales de forma segura
+  function disposeObject(obj){
+    if(!obj) return;
+    obj.traverse(o => {
+      if(o.isMesh || o.isLine || o.isPoints || o.isSprite){
+        if(o.geometry) o.geometry.dispose();
+        let mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach(m => {
+          if(!m) return;
+          for(let k in m){ if(m[k] && m[k].isTexture) m[k].dispose(); }
+          if(m.dispose) m.dispose();
+        });
+      }
+    });
+  }
+
+  // Un solo activador pointer-based para botones (evita doble disparo táctil/click)
+  function bindActionButton(btn, fn){
+    if(!btn) return btn;
+    let lastFire = 0;
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      let now = Date.now();
+      if(now - lastFire < 300) return; // anti-rebote
+      lastFire = now;
+      try{ fn(); }catch(err){ console.error('Botón error:', err); }
+    });
+    return btn;
+  }
+
+  // Detectar si un evento nació en la interfaz (para no arrastrar la cámara)
+  function isUIEventTarget(event){
+    let target = event.target;
+    if(!target || !target.closest) return false;
+    return !!target.closest('#joystick, #joy-thumb, #actions, .action-btn, #char-select, button, #game-init-screen, #title-screen, #loading, #character-transition, #manual-music-activator');
+  }
+
+  // HUD de enemigo: barra compacta, solo se reconstruye cuando cambia el HP
+  function updateEnemyHUD(e){
+    let container = enemyHUD[e.userData.id];
+    if(!container) return;
+    let vp = e.position.clone().project(camera),
+        x = (vp.x*0.5+0.5)*innerWidth,
+        y = (-vp.y*0.5+0.5)*innerHeight - 50;
+    container.className = 'enemy-hearts';
+    container.style.transform = `translate(${x}px,${y}px)`;
+    let hp = Math.max(0, Math.ceil(e.userData.hp));
+    if(container._lastHp !== hp){
+      container._lastHp = hp;
+      container.innerHTML = '';
+      let frag = document.createDocumentFragment();
+      for(let k = 0; k < WORLD_CONFIG.enemyHealth; k++){
+        let heart = document.createElement('div');
+        heart.className = 'enemy-heart' + (k >= hp ? ' heart-empty' : '');
+        frag.appendChild(heart);
+      }
+      container.appendChild(frag);
+    }
+  }
+
+  // Limpieza centralizada de sesión (evita fugas entre partidas)
+  function teardownGameSession(){
+    if(gameRafId){ cancelAnimationFrame(gameRafId); gameRafId = null; }
+    trackedIntervals.forEach(id => clearInterval(id)); trackedIntervals.clear();
+    trackedTimeouts.forEach(id => clearTimeout(id)); trackedTimeouts.clear();
+    if(respawnIntervalId){ clearInterval(respawnIntervalId); respawnIntervalId = null; }
+    joystickActive = false;
+    if(typeof scene !== 'undefined' && scene){
+      enemies.forEach(e => { scene.remove(e); disposeObject(e); });
+      powers.forEach(p => { if(p.mesh){ scene.remove(p.mesh); disposeObject(p.mesh); } });
+    }
+    enemies = []; powers = [];
+    for(let k in enemyHUD){
+      if(enemyHUD[k] && enemyHUD[k].remove) enemyHUD[k].remove();
+      delete enemyHUD[k];
+    }
+    if(renderer && renderer.domElement && renderer.domElement.parentNode){
+      renderer.domElement.parentNode.removeChild(renderer.domElement);
+    }
+  }
+
+
   
 
   function updatePlayerHUD() {
@@ -1953,7 +2082,8 @@ let characterNames = {
   'tenten': 'TENTEN',
   'hinata': 'HINATA HYUGA',
   'temari': 'TEMARI',
-  'sasuke': 'SASUKE UCHIHA'
+  'sasuke': 'SASUKE UCHIHA',
+  'hashirama': 'HASHIRAMA SENJU'
 };
 
 // Mostrar nombre del personaje
@@ -2370,74 +2500,68 @@ function showCharacterName() {
     if(char === 'neji') {
       // Byakugan
       let byakBtn = addButton('btn-byak', 'BYAK');
-      byakBtn.addEventListener('touchstart', e => {e.preventDefault(); activateByakugan();});
-      byakBtn.addEventListener('click', activateByakugan);
+      bindActionButton(byakBtn, activateByakugan);
       
       // Juken
       let jukenBtn = addButton('btn-juken', 'JUKEN');
-      jukenBtn.addEventListener('touchstart', e => {e.preventDefault(); activateJuken();});
-      jukenBtn.addEventListener('click', activateJuken);
+      bindActionButton(jukenBtn, activateJuken);
       
       // 64 Palmas
       let palm64Btn = addButton('btn-64', '64P');
-      palm64Btn.addEventListener('touchstart', e => {e.preventDefault(); activate64Palms();});
-      palm64Btn.addEventListener('click', activate64Palms);
+      bindActionButton(palm64Btn, activate64Palms);
       
       // 128 Palmas
       let palm128Btn = addButton('btn-128', '128P');
-      palm128Btn.addEventListener('touchstart', e => {e.preventDefault(); activate128Palms();});
-      palm128Btn.addEventListener('click', activate128Palms);
+      bindActionButton(palm128Btn, activate128Palms);
       
       // Kaiten
       let kaitenBtn = addButton('btn-kaiten', 'KAIT');
-      kaitenBtn.addEventListener('touchstart', e => {e.preventDefault(); activateKaiten();});
-      kaitenBtn.addEventListener('click', activateKaiten);
+      bindActionButton(kaitenBtn, activateKaiten);
       
       // Kusho
       let kushoBtn = addButton('btn-kusho', 'KUSH');
-      kushoBtn.addEventListener('touchstart', e => {e.preventDefault(); activateKusho();});
-      kushoBtn.addEventListener('click', activateKusho);
+      bindActionButton(kushoBtn, activateKusho);
       
       // Detección
       let detectBtn = addButton('btn-det', 'DET');
-      detectBtn.addEventListener('touchstart', e => {e.preventDefault(); activateDetect();});
-      detectBtn.addEventListener('click', activateDetect);
+      bindActionButton(detectBtn, activateDetect);
     } else if(char === 'itachi') {
-      addButton('btn-sharingan', 'SHAR').addEventListener('touchstart', activateSharingan);
-      addButton('btn-amaterasu', 'AMAT').addEventListener('touchstart', activateAmaterasu);
-      addButton('btn-tsukuyomi', 'TSUK').addEventListener('touchstart', activateTsukuyomi);
-      addButton('btn-susanoo', 'SUSA').addEventListener('touchstart', activateSusanoo);
+      bindActionButton(addButton('btn-sharingan', 'SHAR'), activateSharingan);
+      bindActionButton(addButton('btn-amaterasu', 'AMAT'), activateAmaterasu);
+      bindActionButton(addButton('btn-tsukuyomi', 'TSUK'), activateTsukuyomi);
+      bindActionButton(addButton('btn-susanoo', 'SUSA'), activateSusanoo);
     } else if(char === 'ino') {
-      addButton('btn-mind-transfer', 'MIND').addEventListener('touchstart', activateMindTransfer);
-      addButton('btn-chakra-bomb', 'BOMB').addEventListener('touchstart', activateChakraBomb);
-      addButton('btn-mind-control', 'CTRL').addEventListener('touchstart', activateMindControl);
-      addButton('btn-healing', 'HEAL').addEventListener('touchstart', activateHealing);
+      bindActionButton(addButton('btn-mind-transfer', 'MIND'), activateMindTransfer);
+      bindActionButton(addButton('btn-chakra-bomb', 'BOMB'), activateChakraBomb);
+      bindActionButton(addButton('btn-mind-control', 'CTRL'), activateMindControl);
+      bindActionButton(addButton('btn-healing', 'HEAL'), activateHealing);
     } else if(char === 'shikamaru') {
-      addButton('btn-shadow-possession', 'POSS').addEventListener('touchstart', activateShadowPossession);
-      addButton('btn-shadow-strangle', 'STRN').addEventListener('touchstart', activateShadowStrangle);
+      bindActionButton(addButton('btn-shadow-possession', 'POSS'), activateShadowPossession);
+      bindActionButton(addButton('btn-shadow-strangle', 'STRN'), activateShadowStrangle);
     } else if(char === 'tenten') {
-      addButton('btn-weapon-summon', 'SUMM').addEventListener('touchstart', activateWeaponSummoning);
-      addButton('btn-kunai-rain', 'RAIN').addEventListener('touchstart', activateKunaiRain);
+      bindActionButton(addButton('btn-weapon-summon', 'SUMM'), activateWeaponSummoning);
+      bindActionButton(addButton('btn-kunai-rain', 'RAIN'), activateKunaiRain);
     } else if(char === 'hinata') {
-      addButton('btn-gentle-fist', 'GENT').addEventListener('touchstart', activateGentleFist);
-      addButton('btn-twin-lions', 'LION').addEventListener('touchstart', activateTwinLionFists);
+      bindActionButton(addButton('btn-gentle-fist', 'GENT'), activateGentleFist);
+      bindActionButton(addButton('btn-twin-lions', 'LION'), activateTwinLionFists);
     } else if(char === 'temari') {
-      addButton('btn-fan-dance', 'FAN').addEventListener('touchstart', activateFanDance);
-      addButton('btn-whirlwind', 'WIND').addEventListener('touchstart', activateWhirlwind);
+      bindActionButton(addButton('btn-fan-dance', 'FAN'), activateFanDance);
+      bindActionButton(addButton('btn-whirlwind', 'WIND'), activateWhirlwind);
     } else if(char === 'sasuke') {
-      addButton('btn-chidori', 'CHID').addEventListener('touchstart', activateChidori);
-      addButton('btn-kirin', 'KIRI').addEventListener('touchstart', activateKirin);
-      addButton('btn-sharingan', 'SHAR').addEventListener('touchstart', activateSharingan);
-      addButton('btn-amaterasu', 'AMAT').addEventListener('touchstart', activateAmaterasu);
+      bindActionButton(addButton('btn-chidori', 'CHID'), activateChidori);
+      bindActionButton(addButton('btn-kirin', 'KIRI'), activateKirin);
+      bindActionButton(addButton('btn-sharingan', 'SHAR'), activateSharingan);
+      bindActionButton(addButton('btn-amaterasu', 'AMAT'), activateAmaterasu);
     } else if(char === 'hashirama') {
-      addButton('btn-mokuton', 'MOKU').addEventListener('touchstart', activateMokuton);
-      addButton('btn-senjutsu', 'SENJ').addEventListener('touchstart', activateSenjutsu);
-      addButton('btn-regen', 'REGEN').addEventListener('touchstart', activateRegeneration);
-      addButton('btn-goju', 'GOJU').addEventListener('touchstart', activateGojuMokuton);
+      bindActionButton(addButton('btn-mokuton', 'MOKU'), activateMokuton);
+      bindActionButton(addButton('btn-senjutsu', 'SENJ'), activateSenjutsu);
+      bindActionButton(addButton('btn-regen', 'REGEN'), activateRegeneration);
+      bindActionButton(addButton('btn-goju', 'GOJU'), activateGojuMokuton);
     }
 
     // Habilidades de Hashirama
     function activateMokuton() {
+    let originalY = player.position.y;
       // Crear plataforma principal de madera
       let mainWood = new THREE.Group(); // Usar un grupo para mejor control
 
@@ -2544,24 +2668,37 @@ function showCharacterName() {
       // Detener animación después de 3 segundos
       setTimeout(() => {
         clearInterval(pathInterval);
-        scene.remove(mainWood);
-        woodPath.forEach(w => scene.remove(w));
+        scene.remove(mainWood); disposeObject(mainWood);
+        woodPath.forEach(w => { scene.remove(w); disposeObject(w); });
         player.position.y = originalY;
       }, 3000);
     }
 
     function activateSenjutsu() {
-      // Modo Sabio
-      player.children.forEach(part => {
-        part.material.color.setHex(0xFF4500);
+      // Modo Sabio (sin apilamientos: ignora activaciones repetidas)
+      if(player.userData.senjutsuActive) return;
+      player.userData.senjutsuActive = true;
+      // Guardar colores originales de forma recursiva
+      let originalColors = new Map();
+      player.traverse(child => {
+        if(child.isMesh && child.material && child.material.color){
+          if(!originalColors.has(child.material)){
+            originalColors.set(child.material, child.material.color.getHex());
+          }
+          child.material.color.setHex(0xFF4500);
+        }
       });
-      playerSpeed *= 1.5;
-      setTimeout(() => {
-        player.children.forEach(part => {
-          part.material.color.setHex(0xeeeeee);
+      let baseSpeed = playerSpeed;
+      playerSpeed = baseSpeed * 1.5;
+      trackTimeout(setTimeout(() => {
+        player.traverse(child => {
+          if(child.isMesh && child.material && child.material.color && originalColors.has(child.material)){
+            child.material.color.setHex(originalColors.get(child.material));
+          }
         });
-        playerSpeed /= 1.5;
-      }, 10000);
+        playerSpeed = baseSpeed;
+        player.userData.senjutsuActive = false;
+      }, 10000));
     }
 
     function activateRegeneration() {
@@ -2602,6 +2739,7 @@ function showCharacterName() {
       }, 100);
     }
 
+    teardownGameSession(); // Limpiar cualquier sesión anterior
     init();
     animate();
   }
@@ -3455,6 +3593,14 @@ function showCharacterName() {
         rightLeg.position.set(0.4, -0.8, 0);
 
         characterGroup.add(body, head, leftArm, rightArm, leftLeg, rightLeg);
+
+        // Guardar referencias para animaciones (igual que Neji)
+        characterGroup.userData.body = body;
+        characterGroup.userData.head = head;
+        characterGroup.userData.leftArm = leftArm;
+        characterGroup.userData.rightArm = rightArm;
+        characterGroup.userData.leftLeg = leftLeg;
+        characterGroup.userData.rightLeg = rightLeg;
       }
 
       return characterGroup;
@@ -3471,8 +3617,9 @@ function showCharacterName() {
     // enemigos iniciales
     for(let i=0;i<WORLD_CONFIG.maxEnemies;i++) addEnemy();
     
-    // Sistema de respawn continuo
-    setInterval(respawnEnemies, WORLD_CONFIG.respawnTime);
+    // Sistema de respawn continuo (un solo intervalo por sesión)
+    if(respawnIntervalId) clearInterval(respawnIntervalId);
+    respawnIntervalId = trackInterval(setInterval(respawnEnemies, WORLD_CONFIG.respawnTime));
 
     // JOYSTICK MÓVIL MEJORADO
     const joy=document.getElementById('joystick'),
@@ -3486,6 +3633,7 @@ function showCharacterName() {
       const rect=joy.getBoundingClientRect();
       origin={x:rect.left+rect.width/2,y:rect.top+rect.height/2};
       tracking=true;
+      joystickActive=true;
     });
     
     joy.addEventListener('touchmove',e=>{
@@ -3505,6 +3653,7 @@ function showCharacterName() {
     joy.addEventListener('touchend',e=>{
       e.preventDefault();
       tracking=false;
+      joystickActive=false;
       thumb.style.transform='translate(0,0)';
       moveDir={x:0,z:0};
     });
@@ -3514,6 +3663,7 @@ function showCharacterName() {
       const rect=joy.getBoundingClientRect();
       origin={x:rect.left+rect.width/2,y:rect.top+rect.height/2};
       tracking=true;
+      joystickActive=true;
     });
     
     joy.addEventListener('mousemove',e=>{
@@ -3530,6 +3680,7 @@ function showCharacterName() {
     
     joy.addEventListener('mouseup',()=>{
       tracking=false;
+      joystickActive=false;
       thumb.style.transform='translate(0,0)';
       moveDir={x:0,z:0};
     });
@@ -3538,16 +3689,7 @@ function showCharacterName() {
     const jumpBtn = document.getElementById('jump');
     
     // Eventos táctiles
-    jumpBtn.addEventListener('touchstart', e => {
-      e.preventDefault();
-      if(onGround){velY=0.5;onGround=false;}
-    });
-    
-    // Eventos de mouse para PC
-    jumpBtn.addEventListener('mousedown', e => {
-      e.preventDefault();
-      if(onGround){velY=0.5;onGround=false;}
-    });
+    bindActionButton(jumpBtn, () => { if(onGround){velY=0.5;onGround=false;} });
     
     // Hacer botones más grandes en móvil
     if(/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
@@ -3614,7 +3756,6 @@ function showCharacterName() {
     g.userData.originalScale = g.scale.clone();
     g.userData.tsukuyomiActive = false;
     g.position.set(Math.random()*40-20,0.75,Math.random()*40-20);
-    g.userData={hp:200,id:THREE.MathUtils.generateUUID()};
     scene.add(g); enemies.push(g);
     // HUD
     let container=document.createElement('div');
@@ -3625,7 +3766,7 @@ function showCharacterName() {
   
 
 function animate(){
-    requestAnimationFrame(animate);
+    gameRafId = requestAnimationFrame(animate);
 
     // Detener todo si el juego terminó
     if(gameOver) {
@@ -3673,40 +3814,46 @@ function animate(){
     if(player.position.y<=1.25){player.position.y=1.25;velY=0;onGround=true;}
     // Cámara libre 360° tipo Roblox
     updateFreeCamera();
-    // poderes y colisiones (como antes)...
-    powers.forEach((p,i)=>{
+    // poderes y colisiones (bucle inverso: seguro ante eliminaciones)
+    for(let i=powers.length-1;i>=0;i--){
+      let p=powers[i];
       p.mesh.position.add(p.vel);
       p.life--;
-      enemies.forEach(e=>{
+      // Giro de armas invocadas (antes se redefinía animate())
+      if(p.spin){
+        p.mesh.rotation.x+=p.spin.x;
+        p.mesh.rotation.y+=p.spin.y;
+        p.mesh.rotation.z+=p.spin.z;
+      }
+      for(let j=enemies.length-1;j>=0;j--){
+        let e=enemies[j];
         if(p.life>0 && p.mesh.position.distanceTo(e.position)<1.2){
           e.userData.hp-=p.damage; p.life=0; flash(e.position);
           // Reproducir sonido de impacto cuando el poder golpea al enemigo
           playImpactSound();
+          // Ejecutar callback de impacto si el poder lo define
+          if(typeof p.onHit==='function'){
+            try{ p.onHit(e); }catch(err){ console.error('onHit error:', err); }
+          }
         }
-      });
-      if(p.life<=0){ scene.remove(p.mesh); powers.splice(i,1); }
-    });
-    // IA enemigos + HUD + muerte + daño al jugador
-    enemies.forEach((e,i)=>{
-      let dir=player.position.clone().sub(e.position).setY(0).normalize().multiplyScalar(0.005);
-      e.position.add(dir);
-
-      // Actualizar barra de vida del enemigo
-      let container = enemyHUD[e.userData.id],
-          vp=e.position.clone().project(camera),
-          x=(vp.x*0.5+0.5)*innerWidth,
-          y=(-vp.y*0.5+0.5)*innerHeight - 50;
-      container.innerHTML = '';
-      container.className = 'enemy-hearts';
-      container.style.transform = `translate(${x}px,${y}px)`;
-      for(let i = 0; i < WORLD_CONFIG.enemyHealth; i++) {
-        const heart = document.createElement('div');
-        heart.className = `enemy-heart ${i >= e.userData.hp ? 'heart-empty' : ''}`;
-        container.appendChild(heart);
+      }
+      if(p.life<=0){ scene.remove(p.mesh); disposeObject(p.mesh); powers.splice(i,1); }
+    }
+    // IA enemigos + HUD + muerte + daño al jugador (bucle inverso)
+    for(let i=enemies.length-1;i>=0;i--){
+      let e=enemies[i];
+      // Respetar estados de control/parálisis impuestos por los poderes
+      if(!e.userData.controlled && !e.userData.frozen){
+        let dir=player.position.clone().sub(e.position).setY(0).normalize().multiplyScalar(0.005);
+        e.position.add(dir);
       }
 
-      // Daño al jugador cuando está cerca - SOLO si no está muerto
-      if(!gameOver && e.position.distanceTo(player.position) < 2) {
+      // Actualizar barra de vida del enemigo (cacheada: solo cambia con el HP)
+      updateEnemyHUD(e);
+
+      // Daño al jugador cuando está cerca - SOLO si no está muerto (cooldown 1s)
+      if(!gameOver && Date.now()>playerContactCooldownUntil && e.position.distanceTo(player.position) < 2) {
+        playerContactCooldownUntil = Date.now()+1000;
         playerHealth -= 1; // Quitar 1 vida por golpe
         // Reproducir sonido de impacto cuando el enemigo golpea al jugador
         playImpactSound();
@@ -3729,17 +3876,19 @@ function animate(){
       }
 
       if(e.userData.hp<=0){
-        scene.remove(e); container.remove();
+        let container=enemyHUD[e.userData.id];
+        scene.remove(e); disposeObject(e);
+        if(container) container.remove();
         enemies.splice(i,1); delete enemyHUD[e.userData.id];
 
-        // Respawn automático después de un tiempo
-        setTimeout(() => {
-          if(enemies.length < WORLD_CONFIG.maxEnemies) {
+        // Respawn automático después de un tiempo (timeout rastreado)
+        trackTimeout(setTimeout(() => {
+          if(!gameOver && enemies.length < WORLD_CONFIG.maxEnemies) {
             addEnemy();
           }
-        }, WORLD_CONFIG.respawnTime);
+        }, WORLD_CONFIG.respawnTime));
       }
-    });
+    }
     renderer.render(scene,camera);
   }
 
@@ -4189,7 +4338,7 @@ function animate(){
     // Añadir a poderes con efectos mejorados
     powers.push({
       mesh: jukenStrike,
-      vel: new THREE.Vector3(0, 0, -1.2),
+      vel: getAttackDirection().multiplyScalar(1.2),
       life: 50,
       damage: 75,
       onHit: (enemy) => {
@@ -5644,12 +5793,10 @@ function animate(){
       }, 5000);
 
       // Marcar enemigo como visible a través de paredes
-      e.material.transparent = true;
-      e.material.opacity = 0.7;
-      setTimeout(() => {
-        e.material.transparent = false;
-        e.material.opacity = 1;
-      }, 5000);
+      setEnemyGroupOpacity(e, 0.7, true);
+      trackTimeout(setTimeout(() => {
+        setEnemyGroupOpacity(e, 1, false);
+      }, 5000));
     });
 
     // Restaurar velocidad normal después de 5 segundos
@@ -5675,7 +5822,7 @@ function animate(){
     scene.add(flame);
     powers.push({
       mesh: flame,
-      vel: new THREE.Vector3(0,0,-1),
+      vel: getAttackDirection(),
       life: 60,
       damage: 100
     });
@@ -5964,7 +6111,7 @@ function animate(){
         enemy.userData.hp -= 100;
         
         // Efecto de posesión
-        enemy.material.color.setHex(0x9932CC);
+        setEnemyGroupColor(enemy, 0x9932CC);
         enemy.userData.possessed = true;
         
         // Partículas de control mental
@@ -5989,7 +6136,7 @@ function animate(){
         scene.add(mindParticles);
         
         setTimeout(() => {
-          enemy.material.color.setHex(0xAA0000);
+          setEnemyGroupColor(enemy, 0xAA0000);
           enemy.userData.possessed = false;
           scene.remove(mindParticles);
         }, 3000);
@@ -6083,7 +6230,7 @@ function animate(){
     
     powers.push({
       mesh: chakraBomb,
-      vel: new THREE.Vector3(0, 0, -1.5),
+      vel: getAttackDirection().multiplyScalar(1.5),
       life: 40,
       damage: 80,
       onHit: (enemy) => {
@@ -6192,7 +6339,7 @@ function animate(){
     for(let i = 0; i < 20; i++) {
       let particle = new THREE.Mesh(
         new THREE.BoxGeometry(0.2,0.2,0.2),
-        new THREE.MeshBasicMaterial({color: 0x00FF7F})
+        new THREE.MeshBasicMaterial({color: 0x00FF7F, transparent: true})
       );
       particle.position.copy(player.position);
       scene.add(particle);
@@ -6208,7 +6355,7 @@ function animate(){
       if(++cnt > 20) {
         clearInterval(iv);
         scene.remove(healingField);
-        particles.forEach(p => scene.remove(p));
+        particles.forEach(p => { scene.remove(p); disposeObject(p); });
       }
     }, 100);
   }
@@ -6288,14 +6435,14 @@ function animate(){
         targetEnemy.userData.frozen = true;
         targetEnemy.userData.controlled = true;
         targetEnemy.userData.originalPosition = targetEnemy.position.clone();
-        targetEnemy.material.color.set(0x000000);
+        setEnemyGroupColor(targetEnemy, 0x000000);
 
         // Limpiar después de 5 segundos
         setTimeout(() => {
           shadowSegments.forEach(s => scene.remove(s));
           targetEnemy.userData.frozen = false;
           targetEnemy.userData.controlled = false;
-          targetEnemy.material.color.set(0xAA0000);
+          setEnemyGroupColor(targetEnemy, 0xAA0000);
         }, 5000);
       }
     }, 50);
@@ -6326,7 +6473,7 @@ function animate(){
       enemies.forEach(e => {
         e.userData.frozen = false;
         e.userData.controlled = false;
-        e.material.color.set(0xAA0000);
+        setEnemyGroupColor(e, 0xAA0000);
       });
     }, 5000);
   }
@@ -6407,18 +6554,7 @@ function animate(){
       cnt++;
     }, 100);
 
-    // Actualizar la función animate para hacer girar las armas
-    let originalAnimate = animate;
-    animate = function() {
-      originalAnimate();
-      powers.forEach(p => {
-        if(p.spin) {
-          p.mesh.rotation.x += p.spin.x;
-          p.mesh.rotation.y += p.spin.y;
-          p.mesh.rotation.z += p.spin.z;
-        }
-      });
-    };
+    // El giro de las armas (p.spin) se procesa en el bucle principal de animate()
   }
 
   function activateKunaiRain() {
@@ -6549,7 +6685,7 @@ function animate(){
           scene.add(wind);
           powers.push({
             mesh: wind,
-            vel: new THREE.Vector3(0, 0, -1.5),
+            vel: getAttackDirection().multiplyScalar(1.5),
             life: 40,
             damage: 120
           });
@@ -6617,7 +6753,7 @@ function animate(){
     lightning.position.copy(player.position).add(new THREE.Vector3(0, 1, 0));
     scene.add(lightning);
 
-    let vel = new THREE.Vector3(0, 0, -1);
+    let vel = getAttackDirection();
     powers.push({
       mesh: lightning,
       vel: vel,
@@ -6770,6 +6906,7 @@ function animate(){
 
   // Controles de mouse para PC
   document.addEventListener('mousedown', (event) => {
+    if(isUIEventTarget(event)) return; // No arrastrar la cámara desde la interfaz
     if(event.button === 0) { // Solo botón izquierdo
       isDragging = true;
       lastMouseX = event.clientX;
@@ -6802,6 +6939,7 @@ function animate(){
 
   // Controles táctiles para móviles
   document.addEventListener('touchstart', (event) => {
+    if(isUIEventTarget(event)) return; // No arrastrar la cámara desde la interfaz
     if(event.touches.length === 1) {
       isDragging = true;
       lastMouseX = event.touches[0].clientX;
@@ -6922,6 +7060,8 @@ function animate(){
 
   // Función para actualizar movimiento con teclado
   function updateKeyboardMovement() {
+    // No sobrescribir el joystick móvil cuando está activo
+    if(joystickActive) return;
     // Resetear movimiento
     moveDir = {x: 0, z: 0};
 
@@ -6961,8 +7101,9 @@ function animate(){
 
       // Aplicar movimiento relativo a la cámara - CORREGIDO
       let moveVector = new THREE.Vector3();
-      moveVector.add(forward.clone().multiplyScalar(moveDir.z * playerSpeed)); // Removido el negativo
-      moveVector.add(right.clone().multiplyScalar(moveDir.x * playerSpeed));
+      // moveDir ya incluye playerSpeed (teclado y joystick); no multiplicar dos veces
+      moveVector.add(forward.clone().multiplyScalar(moveDir.z));
+      moveVector.add(right.clone().multiplyScalar(moveDir.x));
 
       // Límites naturales del mundo expandido
       const WORLD_LIMIT = 450;
@@ -7180,6 +7321,7 @@ function animate(){
 
   // Función para volver a la selección de personajes
   function returnToCharacterSelect() {
+    teardownGameSession(); // Detener loops, intervalos y limpiar la escena
     // Detener todas las músicas
     const battleMusic = document.getElementById('battle-music-video');
     if(battleMusic) {
@@ -7430,6 +7572,7 @@ function animate(){
     
     // Pose de Kaiten - rotación completa
     let animTime = 0;
+    let kaitenStartRotationY = player.rotation.y; // Preservar orientación original
     let rotationSpeed = 0.1;
     let poseInterval = setInterval(() => {
       animTime += 0.1;
@@ -7453,8 +7596,8 @@ function animate(){
       
       if(animTime > 2.5) {
         clearInterval(poseInterval);
-        player.rotation.y = 0;
-        resetNejiPose();
+        player.rotation.y = kaitenStartRotationY;
+        resetCharacterPose();
       }
     }, 40);
   }
@@ -7503,11 +7646,15 @@ function animate(){
   speedButton.id = 'speed-button';
   speedButton.className = 'action-btn';
   speedButton.textContent = 'SPEED';
-  speedButton.addEventListener('touchstart', function() {
+  bindActionButton(speedButton, function() {
+    if(player.userData.speedBoostActive) return;
+    player.userData.speedBoostActive = true;
+    let baseSpeed = playerSpeed;
     playerSpeed = 0.6;
-    setTimeout(function() {
-      playerSpeed = 0.25;
-    }, 5000);
+    trackTimeout(setTimeout(function() {
+      playerSpeed = baseSpeed;
+      player.userData.speedBoostActive = false;
+    }, 5000));
   });
 
   document.getElementById('actions').appendChild(speedButton);
